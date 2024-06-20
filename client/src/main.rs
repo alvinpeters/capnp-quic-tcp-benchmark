@@ -1,8 +1,10 @@
 //! This example demonstrates an HTTP client that requests files from a server.
 //!
 //! Checkout the `README.md` for guidance.
+mod quic_client;
+
 use capnp_futures::{serialize, serialize_packed};
-use proto::proto_capnp::*;
+use proto::addressbook_capnp::{address_book, person};
 
 
 use std::{
@@ -24,11 +26,12 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 use url::Url;
 use proto::key_cert_bytes::CERT;
+use crate::quic_client::get_quic_client;
 
 /// HTTP/0.9 over QUIC client
 #[derive(Parser, Debug)]
 #[clap(name = "client")]
-struct Opt {
+pub(crate) struct Opt {
     /// Perform NSS-compatible TLS key logging to the file specified in `SSLKEYLOGFILE`.
     #[clap(long = "keylog")]
     keylog: bool,
@@ -55,29 +58,12 @@ struct Opt {
 async fn main() -> Result<()> {
     aws_lc_rs::default_provider().install_default().unwrap();
     let options = Opt::parse();
-    let url = options.url;
-    let url_host = url.host_str().unwrap();
-    let remote = (url_host, url.port().unwrap_or(4433))
+    let url_host = options.url.host_str().unwrap();
+    let remote = (url_host, options.url.port().unwrap_or(4433))
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
-
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(CertificateDer::from(CertificateDer::from(CERT)))?;
-    let mut client_crypto = rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-
-
-    client_crypto.alpn_protocols = vec![b"h3".to_vec()];
-    if options.keylog {
-        client_crypto.key_log = Arc::new(rustls::KeyLogFile::new());
-    }
-
-    let client_config =
-        quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(client_crypto)?));
-    let mut endpoint = quinn::Endpoint::client(options.bind)?;
-    endpoint.set_default_client_config(client_config);
+    let endpoint = get_quic_client(&options).await?;
 
     let start = Instant::now();
     let rebind = options.rebind;

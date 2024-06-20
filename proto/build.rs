@@ -7,7 +7,11 @@ fn main() -> Result<()> {
     let key_path = Path::join(std::env::var("OUT_DIR").unwrap().as_ref(), "key.der");
     let cert_path = Path::join(std::env::var("OUT_DIR").unwrap().as_ref(), "cert.der");
     capnpc::CompilerCommand::new()
-        .file("proto.capnp")
+        .file("addressbook.capnp")
+        .run()
+        .expect("compiling schema");
+    capnpc::CompilerCommand::new()
+        .file("calculator.capnp")
         .run()
         .expect("compiling schema");
     let key_cert = rcgen::generate_simple_self_signed(subject_names)

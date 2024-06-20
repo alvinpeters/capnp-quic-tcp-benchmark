@@ -1,20 +1,18 @@
+mod quic_server;
+mod capnp_server;
+
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::Arc;
 use anyhow::{Result, Error};
 use capnp_futures::serialize::read_message;
-use proto::key_cert_bytes::*;
 use clap::Parser;
-use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Incoming, RecvStream, SendStream};
-use rustls::crypto::aws_lc_rs;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_util::compat::{TokioAsyncReadCompatExt};
-use proto::proto_capnp::{address_book, person};
+use proto::addressbook_capnp::{address_book, person};
+use crate::quic_server::get_quic_server;
 
 #[derive(Parser, Debug)]
 #[clap(name = "server")]
-struct Opt {
+pub(crate) struct Opt {
     /// file to log TLS keys to for debugging
     #[clap(long = "keylog")]
     keylog: bool,
@@ -45,21 +43,7 @@ async fn main() {
 }
 
 async fn listen(ctx_opts: Opt) -> Result<()> {
-    let certs = vec![CertificateDer::try_from(CERT).unwrap()];
-    let key = PrivateKeyDer::try_from(KEY).unwrap();
-    aws_lc_rs::default_provider().install_default().unwrap();
-    let mut server_crypto = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)?;
-    server_crypto.alpn_protocols = vec![b"h3".to_vec()];
-    if ctx_opts.keylog {
-        server_crypto.key_log = Arc::new(rustls::KeyLogFile::new());
-    }
-    let mut server_config =
-        quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
-    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(0_u8.into());
-    let endpoint = quinn::Endpoint::server(server_config, ctx_opts.listen)?;
+    let endpoint = get_quic_server(&ctx_opts).await?;
     println!("listening on {}", endpoint.local_addr()?);
     while let Some(conn) = endpoint.accept().await {
         if ctx_opts
@@ -107,10 +91,11 @@ async fn handle_connection(conn: Incoming) -> Result<()> {
                 }
             }
         );
+        println!();
     }
 }
 
-async fn print_addressbook((mut send_stream, mut receive_stream): (SendStream, RecvStream)) -> Result<()> {
+async fn print_addressbook((_send_stream, mut receive_stream): (SendStream, RecvStream)) -> Result<()> {
 
     let message_reader
         = read_message(&mut receive_stream.compat(), capnp::message::ReaderOptions::new()).await?;

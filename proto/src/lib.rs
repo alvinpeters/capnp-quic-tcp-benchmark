@@ -1,5 +1,8 @@
-pub mod proto_capnp {
-    include!(concat!(env!("OUT_DIR"), "/proto_capnp.rs"));
+pub mod addressbook_capnp {
+    include!(concat!(env!("OUT_DIR"), "/addressbook_capnp.rs"));
+}
+pub mod calculator_capnp {
+    include!(concat!(env!("OUT_DIR"), "/calculator_capnp.rs"));
 }
 
 pub mod key_cert_bytes {
