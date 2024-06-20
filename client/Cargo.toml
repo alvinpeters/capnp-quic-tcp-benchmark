@@ -1,0 +1,18 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proto = { path = "../proto"}
+quinn = "0.11.2"
+rustls = { version = "0.23.10", features = ["aws_lc_rs"]}
+capnp = "0.19.6"
+capnp-futures = { version = "0.19.0", features = []}
+anyhow = "1.0.86"
+clap = { version = "4.5.7", features = ["derive"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+url = "2.5.2"
+tokio = { features = ["full", "rt-multi-thread"], version = "1.38.0"}
+tokio-util = { version = "0.7.11", features = ["compat"] }
