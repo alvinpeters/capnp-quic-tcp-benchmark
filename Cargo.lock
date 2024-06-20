@@ -311,26 +311,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b82cf0babdbd58558212896d1a4272303a57bdb245c2bf1147185fb45640e70"
 
 [[package]]
-name = "client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "capnp",
- "capnp-futures",
- "capnp-rpc",
- "clap",
- "futures",
- "proto",
- "quinn",
- "rustls",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "cmake"
 version = "0.1.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -897,12 +877,52 @@ dependencies = [
 ]
 
 [[package]]
-name = "proto"
+name = "protos"
 version = "0.1.0"
 dependencies = [
  "capnp",
  "capnpc",
  "rcgen",
+]
+
+[[package]]
+name = "quic-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capnp",
+ "capnp-futures",
+ "capnp-rpc",
+ "clap",
+ "futures",
+ "protos",
+ "quinn",
+ "rustls",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "quic-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capnp",
+ "capnp-futures",
+ "capnp-rpc",
+ "clap",
+ "futures-util",
+ "protos",
+ "quinn",
+ "rustls",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1251,26 +1271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "capnp",
- "capnp-futures",
- "capnp-rpc",
- "clap",
- "futures-util",
- "proto",
- "quinn",
- "rustls",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1346,6 +1346,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tcp-client"
+version = "0.1.0"
+dependencies = [
+ "capnp",
+ "futures",
+ "protos",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "tcp-server"
+version = "0.1.0"
+dependencies = [
+ "capnp",
+ "futures",
+ "protos",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

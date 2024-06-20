@@ -25,7 +25,7 @@ use capnp::Error;
 
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 
-use proto::calculator_capnp::calculator;
+use protos::calculator_capnp::calculator;
 use capnp::capability::{Client, Promise};
 use futures_util::future;
 use quinn::{Endpoint, RecvStream, SendStream};

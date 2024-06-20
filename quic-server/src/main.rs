@@ -9,9 +9,9 @@ use clap::Parser;
 use quinn::{Incoming, RecvStream, SendStream};
 use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt};
-use proto::addressbook_capnp::{address_book, person};
+use protos::addressbook_capnp::{address_book, person};
 use crate::capnp_server::{CalculatorImpl, start_rpc};
-use proto::calculator_capnp::calculator;
+use protos::calculator_capnp::calculator;
 use crate::quic_server::{get_quic_server, handle_conn};
 
 #[derive(Parser, Debug)]

@@ -1,10 +1,10 @@
 [package]
-name = "server"
+name = "quic-server"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-proto = { path = "../proto"}
+protos = { path = "../protos" }
 tokio = { version = "1.38.0", features = ["full", "rt-multi-thread"] }
 tokio-util = { version = "0.7.11", features = ["full", "compat"] }
 tokio-stream = { version = "0.1.15", features = ["full"] }

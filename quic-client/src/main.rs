@@ -5,7 +5,7 @@ mod quic_client;
 mod capnp_client;
 
 use capnp_futures::{serialize, serialize_packed};
-use proto::addressbook_capnp::{address_book, person};
+use protos::addressbook_capnp::{address_book, person};
 
 
 use std::{

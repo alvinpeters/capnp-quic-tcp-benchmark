@@ -2,7 +2,9 @@
 resolver = "2"
 
 members = [
-    "client",
-    "proto",
-    "server"
+    "protos",
+    "tcp-client",
+    "tcp-server",
+    "quic-client",
+    "quic-server"
 ]

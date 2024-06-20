@@ -3,7 +3,7 @@ use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint, Incoming, RecvStream, SendStream};
 use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use proto::key_cert_bytes::{CERT, KEY};
+use protos::key_cert_bytes::{CERT, KEY};
 use anyhow::{Error, Result};
 use crate::{Opt};
 

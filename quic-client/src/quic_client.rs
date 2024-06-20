@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::Endpoint;
 use rustls::pki_types::CertificateDer;
-use proto::key_cert_bytes::CERT;
+use protos::key_cert_bytes::CERT;
 use crate::Opt;
 
 pub(crate) async fn get_quic_client(ctx_opts: &Opt) -> Result<Endpoint> {
