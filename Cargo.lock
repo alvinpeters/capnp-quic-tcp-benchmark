@@ -208,6 +208,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp-rpc"
+version = "0.19.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13b692f9454566fa16c5897a5d329e77496b6c8012777025f18cc82f7a65617e"
+dependencies = [
+ "capnp",
+ "capnp-futures",
+ "futures",
+]
+
+[[package]]
 name = "capnpc"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -306,6 +317,7 @@ dependencies = [
  "anyhow",
  "capnp",
  "capnp-futures",
+ "capnp-rpc",
  "clap",
  "proto",
  "quinn",
@@ -1232,7 +1244,9 @@ dependencies = [
  "anyhow",
  "capnp",
  "capnp-futures",
+ "capnp-rpc",
  "clap",
+ "futures-util",
  "proto",
  "quinn",
  "rustls",

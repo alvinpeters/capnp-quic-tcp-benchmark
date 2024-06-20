@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use quinn::crypto::rustls::QuicServerConfig;
-use quinn::Endpoint;
+use quinn::{Endpoint, Incoming, RecvStream, SendStream};
 use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use proto::key_cert_bytes::{CERT, KEY};
-use anyhow::Result;
-use crate::Opt;
+use anyhow::{Error, Result};
+use crate::{Opt};
 
 pub async fn get_quic_server(ctx_opts: &Opt) -> Result<Endpoint> {
     let certs = vec![CertificateDer::try_from(CERT).unwrap()];
@@ -23,4 +23,22 @@ pub async fn get_quic_server(ctx_opts: &Opt) -> Result<Endpoint> {
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
     Ok(Endpoint::server(server_config, ctx_opts.listen)?)
+}
+
+pub async fn handle_conn(conn: Incoming) -> Result<Option<(SendStream, RecvStream)>> {
+    let connection = conn.await?;
+    println!("established");
+    loop {
+        // Wait for connection
+        return match connection.accept_bi().await {
+            Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
+                println!("connection closed");
+                Ok(None)
+            }
+            Err(e) => {
+                Err(Error::from(e))
+            }
+            Ok(s) => Ok(Some(s)),
+        }
+    }
 }

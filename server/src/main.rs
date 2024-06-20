@@ -1,6 +1,7 @@
 mod quic_server;
 mod capnp_server;
 
+use std::future::Future;
 use std::net::SocketAddr;
 use anyhow::{Result, Error};
 use capnp_futures::serialize::read_message;
@@ -8,7 +9,9 @@ use clap::Parser;
 use quinn::{Incoming, RecvStream, SendStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt};
 use proto::addressbook_capnp::{address_book, person};
-use crate::quic_server::get_quic_server;
+use crate::capnp_server::{CalculatorImpl, start_rpc};
+use proto::calculator_capnp::calculator;
+use crate::quic_server::{get_quic_server, handle_conn};
 
 #[derive(Parser, Debug)]
 #[clap(name = "server")]
@@ -28,38 +31,27 @@ pub(crate) struct Opt {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     println!("Starting server!");
-    let opt = Opt::parse();
-    let code = {
-        if let Err(e) = listen(opt).await {
-            eprintln!("ERROR: {e}");
-            1
-        } else {
-            0
-        }
-    };
-    std::process::exit(code);
-}
-
-async fn listen(ctx_opts: Opt) -> Result<()> {
-    let endpoint = get_quic_server(&ctx_opts).await?;
+    let options = Opt::parse();
+    let endpoint = get_quic_server(&options).await?;
     println!("listening on {}", endpoint.local_addr()?);
+    let calc: calculator::Client = capnp_rpc::new_client(CalculatorImpl);
     while let Some(conn) = endpoint.accept().await {
-        if ctx_opts
+        if options
             .connection_limit
             .map_or(false, |n| endpoint.open_connections() >= n)
         {
             println!("refusing due to open connection limit");
             conn.refuse();
-        } else if ctx_opts.stateless_retry && !conn.remote_address_validated() {
+        } else if options.stateless_retry && !conn.remote_address_validated() {
             println!("requiring connection to validate its address");
             conn.retry().unwrap();
         } else {
             println!("accepting connection");
-            let fut = handle_connection(conn);
+            let fut = start_rpc_connection(conn, start_rpc).await;
             tokio::spawn(async move {
-                if let Err(e) = fut.await {
+                if let Err(e) = fut {
                     eprintln!("connection failed: {reason}", reason = e.to_string())
                 }
             });
@@ -68,31 +60,15 @@ async fn listen(ctx_opts: Opt) -> Result<()> {
     Ok(())
 }
 
-async fn handle_connection(conn: Incoming) -> Result<()> {
-    let connection = conn.await?;
-    println!("established");
-    loop {
-        // Wait for connection
-        let streams = match connection.accept_bi().await {
-            Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
-                println!("connection closed");
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(Error::from(e));
-            }
-            Ok(s) => s,
-        };
-        let fut = print_addressbook(streams);
-        tokio::spawn(
-            async move {
-                if let Err(e) = fut.await {
-                    eprintln!("failed: {reason}", reason = e.to_string());
-                }
-            }
-        );
-        println!();
-    }
+async fn start_rpc_connection<F, Fut>(conn: Incoming, f: F) -> Result<()> where
+    F: FnOnce(SendStream, RecvStream, calculator::Client) -> Fut,
+    Fut: Future<Output = Result<()>>
+{
+    let calc: calculator::Client = capnp_rpc::new_client(CalculatorImpl);
+    let Some((recv, send)) = handle_conn(conn).await? else {
+        return Ok(())
+    };
+    Ok(f(recv, send, calc.clone()).await?)
 }
 
 async fn print_addressbook((_send_stream, mut receive_stream): (SendStream, RecvStream)) -> Result<()> {

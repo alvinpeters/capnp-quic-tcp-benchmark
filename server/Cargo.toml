@@ -11,8 +11,10 @@ tokio-stream = { version = "0.1.15", features = ["full"] }
 quinn = "0.11.2"
 rustls = { version = "0.23.10", features = ["aws_lc_rs"]}
 capnp = "0.19.6"
+capnp-rpc = "0.19.2"
 capnp-futures = { version = "0.19.0", features = []}
 anyhow = "1.0.86"
 clap = { version = "4.5.7", features = ["derive"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+futures-util = "0.3.30"
