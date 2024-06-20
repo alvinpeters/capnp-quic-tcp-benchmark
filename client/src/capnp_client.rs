@@ -62,7 +62,7 @@ pub(crate) async fn connect_rpc_server(mut send_stream: SendStream, mut receive_
 
     let mut rpc_system = RpcSystem::new(network, None);
     let calculator: calculator::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-    tokio::task::spawn_local(rpc_system);
+    let handle = tokio::task::spawn_local(rpc_system);
 
 
     {
@@ -371,6 +371,8 @@ pub(crate) async fn connect_rpc_server(mut send_stream: SendStream, mut receive_
 
         println!("PASS");
     }
+    // Immediately stops the RPC client because it can linger for several seconds
+    handle.abort();
 
     Ok(())
 }
