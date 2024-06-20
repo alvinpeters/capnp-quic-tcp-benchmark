@@ -14,7 +14,7 @@ pub async fn get_quic_server(ctx_opts: &Opt) -> Result<Endpoint> {
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
-    server_crypto.alpn_protocols = vec![b"h3".to_vec()];
+    //server_crypto.alpn_protocols = vec![b"h3".to_vec()];
     if ctx_opts.keylog {
         server_crypto.key_log = Arc::new(rustls::KeyLogFile::new());
     }

@@ -63,16 +63,18 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
     let endpoint = get_quic_client(&options).await?;
 
-    let start = Instant::now();
+    //let start = Instant::now();
     let rebind = options.rebind;
     let host = options.host.as_deref().unwrap_or(&url_host);
 
     eprintln!("connecting to {host} at {remote}");
+    let conn_timer = tokio::time::Instant::now();
     let conn = endpoint
         .connect(remote, host)?
         .await
         .map_err(|e| anyhow!("failed to connect: {}", e))?;
-    eprintln!("connected at {:?}", start.elapsed());
+    //eprintln!("connected at {:?}", start.elapsed());
+
     let (send, recv) = conn
         .open_bi()
         .await
@@ -83,6 +85,7 @@ async fn main() -> Result<()> {
         eprintln!("rebinding to {addr}");
         endpoint.rebind(socket).expect("rebind failed");
     }
+    println!("Connection established. Took {}ms", conn_timer.elapsed().as_micros());
     let local = LocalSet::new();
     local.run_until(connect_rpc_server(send, recv)).await?;
     local.await;
@@ -91,55 +94,4 @@ async fn main() -> Result<()> {
     endpoint.wait_idle().await;
 
     Ok(())
-}
-
-fn duration_secs(x: &Duration) -> f32 {
-    x.as_secs() as f32 + x.subsec_nanos() as f32 * 1e-9
-}
-
-async fn write_addressbook(mut stream: &mut Compat<SendStream>) -> Result<()> {
-    let mut message = ::capnp::message::Builder::new_default();
-    {
-        let address_book = message.init_root::<address_book::Builder>();
-
-        let mut people = address_book.init_people(2);
-        {
-            let mut alice = people.reborrow().get(0);
-            alice.set_id(123);
-            alice.set_name("Alice");
-            alice.set_email("alice@example.com");
-            {
-                let mut alice_phones = alice.reborrow().init_phones(1);
-                alice_phones.reborrow().get(0).set_number("555-1212");
-                alice_phones
-                    .reborrow()
-                    .get(0)
-                    .set_type(person::phone_number::Type::Mobile);
-            }
-            alice.get_employment().set_school("MIT");
-        }
-
-        {
-            let mut bob = people.get(1);
-            bob.set_id(456);
-            bob.set_name("Bob");
-            bob.set_email("bob@example.com");
-            {
-                let mut bob_phones = bob.reborrow().init_phones(2);
-                bob_phones.reborrow().get(0).set_number("555-4567");
-                bob_phones
-                    .reborrow()
-                    .get(0)
-                    .set_type(person::phone_number::Type::Home);
-                bob_phones.reborrow().get(1).set_number("555-7654");
-                bob_phones
-                    .reborrow()
-                    .get(1)
-                    .set_type(person::phone_number::Type::Work);
-            }
-            bob.get_employment().set_unemployed(());
-        }
-    }
-
-    Ok(serialize::write_message(&mut stream, &message).await?)
 }

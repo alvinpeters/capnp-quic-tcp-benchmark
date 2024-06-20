@@ -1353,9 +1353,13 @@ name = "tcp-client"
 version = "0.1.0"
 dependencies = [
  "capnp",
+ "capnp-futures",
+ "capnp-rpc",
  "futures",
  "protos",
+ "rustls",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
 ]
 
@@ -1364,9 +1368,13 @@ name = "tcp-server"
 version = "0.1.0"
 dependencies = [
  "capnp",
+ "capnp-futures",
+ "capnp-rpc",
  "futures",
  "protos",
+ "rustls",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
 ]
 
@@ -1462,6 +1470,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
+dependencies = [
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
 ]
 
 [[package]]

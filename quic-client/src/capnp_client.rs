@@ -61,8 +61,9 @@ pub(crate) async fn connect_rpc_server(send_stream: SendStream, receive_stream: 
 
     let mut rpc_system = RpcSystem::new(network, None);
     let calculator: calculator::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-    let handle = tokio::task::spawn_local(rpc_system);
-
+    // Get disconnector. Real essential for maintaining connection and notifying peer.
+    let disconnector = rpc_system.get_disconnector();
+    tokio::task::spawn_local(rpc_system);
 
     {
         // Make a request that just evaluates the literal value 123.
@@ -370,8 +371,10 @@ pub(crate) async fn connect_rpc_server(send_stream: SendStream, receive_stream: 
 
         println!("PASS");
     }
-    // Immediately stops the RPC client because it can linger for several seconds
-    handle.abort();
+    // Disconnect client.
+    // This will also notify the TLS peer.
+    // https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+    disconnector.await?;
 
     Ok(())
 }

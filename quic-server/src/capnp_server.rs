@@ -215,7 +215,8 @@ pub async fn start_rpc(send_stream: SendStream, receive_stream: RecvStream, clie
     );
 
     let rpc_system = RpcSystem::new(Box::new(network), Some(client.client));
-    tokio::task::spawn_local(rpc_system).await;
+    let handle = tokio::task::spawn_local(rpc_system);
     println!("RPC connected");
+    handle.await??;
     Ok(())
 }
