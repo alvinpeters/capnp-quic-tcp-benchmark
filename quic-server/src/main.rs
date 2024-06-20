@@ -37,7 +37,6 @@ async fn main() -> Result<()> {
     let options = Opt::parse();
     let endpoint = get_quic_server(&options).await?;
     println!("listening on {}", endpoint.local_addr()?);
-    let calc: calculator::Client = capnp_rpc::new_client(CalculatorImpl);
     while let Some(conn) = endpoint.accept().await {
         if options
             .connection_limit

@@ -3,7 +3,11 @@ use std::io::{Result, Write};
 use std::path::Path;
 
 fn main() -> Result<()> {
-    let subject_names = vec!["localhost".to_string()];
+    let subject_names = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "[::1]".to_string(),
+    ];
     let key_path = Path::join(std::env::var("OUT_DIR").unwrap().as_ref(), "key.der");
     let cert_path = Path::join(std::env::var("OUT_DIR").unwrap().as_ref(), "cert.der");
     capnpc::CompilerCommand::new()

@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 
 use protos::calculator_capnp::calculator;
-use capnp::capability::{FromClientHook, Promise};
+use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 
 use futures::AsyncReadExt;
@@ -97,7 +97,7 @@ async fn try_main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let conn_timer = Instant::now();
     let tcp_stream = TcpStream::connect(&addr).await?;
     tcp_stream.set_nodelay(true)?;
-    let mut stream = tls_connector.connect(host, tcp_stream).await?;
+    let stream = tls_connector.connect(host, tcp_stream).await?;
 
     println!("Connection established. Took {}ms", conn_timer.elapsed().as_micros());
     let (reader, writer) = stream.compat().split();
