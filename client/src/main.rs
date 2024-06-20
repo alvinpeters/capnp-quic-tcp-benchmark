@@ -23,10 +23,12 @@ use quinn::crypto::rustls::QuicClientConfig;
 use quinn::SendStream;
 use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::CertificateDer;
+use tokio::task::{LocalSet, spawn_local};
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 use url::Url;
 use proto::key_cert_bytes::CERT;
+use crate::capnp_client::connect_rpc_server;
 use crate::quic_client::get_quic_client;
 
 /// HTTP/0.9 over QUIC client
@@ -36,7 +38,7 @@ pub(crate) struct Opt {
     /// Perform NSS-compatible TLS key logging to the file specified in `SSLKEYLOGFILE`.
     #[clap(long = "keylog")]
     keylog: bool,
-    url: Url,
+    url: Option<String>,
 
     /// Override hostname used for certificate verification
     #[clap(long = "host")]
@@ -59,8 +61,10 @@ pub(crate) struct Opt {
 async fn main() -> Result<()> {
     aws_lc_rs::default_provider().install_default().unwrap();
     let options = Opt::parse();
-    let url_host = options.url.host_str().unwrap();
-    let remote = (url_host, options.url.port().unwrap_or(4433))
+    let url_host_str = options.url.clone().unwrap_or_else(|| "https://localhost:4433".to_string());
+    let url = Url::parse(&url_host_str).unwrap();
+    let url_host = url.host().unwrap().to_string();
+    let remote = (url_host.clone(), url.port().unwrap_or(4433))
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
@@ -68,7 +72,7 @@ async fn main() -> Result<()> {
 
     let start = Instant::now();
     let rebind = options.rebind;
-    let host = options.host.as_deref().unwrap_or(url_host);
+    let host = options.host.as_deref().unwrap_or(&url_host);
 
     eprintln!("connecting to {host} at {remote}");
     let conn = endpoint
@@ -86,23 +90,10 @@ async fn main() -> Result<()> {
         eprintln!("rebinding to {addr}");
         endpoint.rebind(socket).expect("rebind failed");
     }
-    let mut compat_send = send.compat_write();
-    write_addressbook(&mut compat_send).await?;
-    compat_send.get_mut().finish().unwrap();
-    let response_start = Instant::now();
-    eprintln!("request sent at {:?}", response_start - start);
-    let resp = recv
-        .read_to_end(usize::MAX)
-        .await
-        .map_err(|e| anyhow!("failed to read response: {}", e))?;
-    let duration = response_start.elapsed();
-    eprintln!(
-        "response received in {:?} - {} KiB/s",
-        duration,
-        resp.len() as f32 / (duration_secs(&duration) * 1024.0)
-    );
+    let local = LocalSet::new();
+    local.run_until(connect_rpc_server(send, recv)).await?;
+    local.await;
     conn.close(0u32.into(), b"done");
-
     // Give the server a fair chance to receive the close packet
     endpoint.wait_idle().await;
 

@@ -7,6 +7,7 @@ use anyhow::{Result, Error};
 use capnp_futures::serialize::read_message;
 use clap::Parser;
 use quinn::{Incoming, RecvStream, SendStream};
+use tokio::task::LocalSet;
 use tokio_util::compat::{TokioAsyncReadCompatExt};
 use proto::addressbook_capnp::{address_book, person};
 use crate::capnp_server::{CalculatorImpl, start_rpc};
@@ -68,7 +69,9 @@ async fn start_rpc_connection<F, Fut>(conn: Incoming, f: F) -> Result<()> where
     let Some((recv, send)) = handle_conn(conn).await? else {
         return Ok(())
     };
-    Ok(f(recv, send, calc.clone()).await?)
+    let local = LocalSet::new();
+    local.run_until(f(recv, send, calc.clone())).await?;
+    Ok(())
 }
 
 async fn print_addressbook((_send_stream, mut receive_stream): (SendStream, RecvStream)) -> Result<()> {

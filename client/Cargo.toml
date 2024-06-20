@@ -17,3 +17,4 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 url = "2.5.2"
 tokio = { features = ["full", "rt-multi-thread"], version = "1.38.0"}
 tokio-util = { version = "0.7.11", features = ["compat"] }
+futures = "0.3.30"
