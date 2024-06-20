@@ -3,7 +3,7 @@ mod capnp_server;
 
 use std::future::Future;
 use std::net::SocketAddr;
-use anyhow::{Result, Error};
+use anyhow::{Result};
 use capnp_futures::serialize::read_message;
 use clap::Parser;
 use quinn::{Incoming, RecvStream, SendStream};
@@ -74,7 +74,7 @@ async fn start_rpc_connection<F, Fut>(conn: Incoming, f: F) -> Result<()> where
     Ok(())
 }
 
-async fn print_addressbook((_send_stream, mut receive_stream): (SendStream, RecvStream)) -> Result<()> {
+async fn print_addressbook((_send_stream, receive_stream): (SendStream, RecvStream)) -> Result<()> {
 
     let message_reader
         = read_message(&mut receive_stream.compat(), capnp::message::ReaderOptions::new()).await?;

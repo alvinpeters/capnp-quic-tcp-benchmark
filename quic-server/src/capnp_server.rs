@@ -26,9 +26,9 @@ use capnp::Error;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 
 use protos::calculator_capnp::calculator;
-use capnp::capability::{Client, Promise};
+use capnp::capability::{Promise};
 use futures_util::future;
-use quinn::{Endpoint, RecvStream, SendStream};
+use quinn::{RecvStream, SendStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use anyhow::Result;
 
@@ -203,10 +203,10 @@ impl calculator::Server for CalculatorImpl {
     }
 }
 
-pub async fn start_rpc(mut send_stream: SendStream, mut receive_stream: RecvStream, client: calculator::Client) -> Result<()> {
+pub async fn start_rpc(send_stream: SendStream, receive_stream: RecvStream, client: calculator::Client) -> Result<()> {
     // Compatibility layer for futures
-    let mut receive_stream = receive_stream.compat();
-    let mut send_stream = send_stream.compat_write();
+    let receive_stream = receive_stream.compat();
+    let send_stream = send_stream.compat_write();
     let network = twoparty::VatNetwork::new(
         receive_stream,
         send_stream,

@@ -4,30 +4,23 @@
 mod quic_client;
 mod capnp_client;
 
-use capnp_futures::{serialize, serialize_packed};
+use capnp_futures::{serialize};
 use protos::addressbook_capnp::{address_book, person};
 
 
 use std::{
-    fs,
-    io::{self, Write},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use quinn::crypto::rustls::QuicClientConfig;
 use quinn::SendStream;
 use rustls::crypto::aws_lc_rs;
-use rustls::pki_types::CertificateDer;
-use tokio::task::{LocalSet, spawn_local};
-use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
-use tracing::{error, info};
+use tokio::task::{LocalSet};
+use tokio_util::compat::{Compat};
 use url::Url;
-use proto::key_cert_bytes::CERT;
 use crate::capnp_client::connect_rpc_server;
 use crate::quic_client::get_quic_client;
 
@@ -80,7 +73,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| anyhow!("failed to connect: {}", e))?;
     eprintln!("connected at {:?}", start.elapsed());
-    let (mut send, mut recv) = conn
+    let (send, recv) = conn
         .open_bi()
         .await
         .map_err(|e| anyhow!("failed to open stream: {}", e))?;

@@ -23,7 +23,6 @@ use protos::calculator_capnp::calculator;
 
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
-use anyhow::Result;
 
 use quinn::{RecvStream, SendStream};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -49,9 +48,9 @@ impl calculator::function::Server for PowerFunction {
     }
 }
 
-pub(crate) async fn connect_rpc_server(mut send_stream: SendStream, mut receive_stream: RecvStream) -> anyhow::Result<()> {
-    let mut receive_stream = receive_stream.compat();
-    let mut send_stream = send_stream.compat_write();
+pub(crate) async fn connect_rpc_server(send_stream: SendStream, receive_stream: RecvStream) -> anyhow::Result<()> {
+    let receive_stream = receive_stream.compat();
+    let send_stream = send_stream.compat_write();
 
     let network = Box::new(twoparty::VatNetwork::new(
         receive_stream,
