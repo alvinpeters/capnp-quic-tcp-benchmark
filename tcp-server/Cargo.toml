@@ -3,6 +3,9 @@ name = "tcp-server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+ring = ["rustls/ring"]
+
 [dependencies]
 # Crate containing generated certs and cap'n proto code
 protos = { path = "../protos" }
@@ -17,3 +20,6 @@ tokio-util = { version = "0.7.4", features = ["compat"] }
 rustls = "0.23.10"
 tokio-rustls = "0.26.0"
 futures = "0.3.30"
+
+[target.'cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))'.dependencies]
+aws-lc-rs = { version = "1", features = ["bindgen"] }

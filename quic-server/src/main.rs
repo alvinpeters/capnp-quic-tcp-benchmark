@@ -35,10 +35,9 @@ use quinn::Endpoint;
 
 use futures::{future, FutureExt};
 
-use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
-use tokio::task::{JoinSet, LocalSet};
+use tokio::task::{JoinSet, LocalSet, spawn_local};
 use tokio::time::Instant;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use protos::key_cert_bytes::{CERT, KEY};
@@ -219,7 +218,7 @@ impl calculator::Server for CalculatorImpl {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     use std::net::ToSocketAddrs;
     let args: Vec<String> = ::std::env::args().collect();
@@ -235,8 +234,11 @@ async fn main() -> Result<()> {
     // Include self-signed generated keys
     let certs = vec![CertificateDer::try_from(CERT).unwrap()];
     let key = PrivateKeyDer::try_from(KEY).unwrap();
-    // Use AWS libcrypto
-    aws_lc_rs::default_provider().install_default().unwrap();
+    // Set libcrypto provider
+    #[cfg(feature = "ring")]
+    rustls::crypto::ring::default_provider().install_default().unwrap();
+    #[cfg(not(feature = "ring"))]
+    rustls::crypto::aws_lc_rs::default_provider().install_default().unwrap();
     // Set up TLS config
     let server_crypto = ServerConfig::builder()
         .with_no_client_auth()
@@ -249,7 +251,7 @@ async fn main() -> Result<()> {
 
     // Set up the server
     let listener = Endpoint::server(server_config, addr)?;
-    println!("Listening to {}", addr);
+    println!("Listening for UDP packets on {}", addr);
 
     let local_set = LocalSet::new();
     local_set.spawn_local(async move {
@@ -257,18 +259,38 @@ async fn main() -> Result<()> {
         // Accept incoming connections
         while let Some(incoming) = listener.accept().await {
             let conn_timer = Instant::now();
-            let remote_addr = incoming.remote_address();
             // Accept requests
-            let Ok(conn) = incoming.await else {
-                eprintln!("Failed to handle incoming UDP connection. Breaking.");
-                continue;
+            // 0-RTT BABY!
+            // Don't use this in real life please
+            // This is a pyramid of doom
+            let conn = match incoming.accept() {
+                Ok(c) => match c.into_0rtt() {
+                    Ok((c, accepted)) => {
+                        println!("QUIC 0-RTT BABY!");
+                        spawn_local(async move {
+                            accepted.await;
+                            println!("Finally connected for real");
+                        });
+                        c
+                    },
+                    Err(c) => match c.await {
+                        Ok(c) => c,
+                        Err(_e) => {
+                            eprintln!("Failed to handle incoming UDP connection. Breaking.");
+                            continue;
+                        }
+                    }}
+                Err(_e) => {
+                    eprintln!("Failed to accept incoming UDP connection. Breaking.");
+                    continue;
+                }
             };
             let Ok((writer, reader)) = conn.accept_bi().await else {
                 eprintln!("Failed to accept new UDP connection. Breaking.");
                 continue;
             };
-            println!("Accepted TCP/TLS connection from {}. Took {}ms.",
-                     remote_addr, conn_timer.elapsed().as_micros());
+            println!("Accepted QUIC connection from {}. Took {}ms.",
+                     conn.remote_address(), conn_timer.elapsed().as_micros());
             // Do RPC server stuff
             let network = twoparty::VatNetwork::new(
                 reader.compat(),

@@ -33,7 +33,6 @@ use capnp::capability::Promise;
 
 use futures::{future, FutureExt};
 
-use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use tokio::io;
@@ -219,7 +218,7 @@ impl calculator::Server for CalculatorImpl {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     use std::net::ToSocketAddrs;
     let args: Vec<String> = ::std::env::args().collect();
@@ -235,8 +234,11 @@ async fn main() -> Result<()> {
     // Include self-signed generated keys
     let certs = vec![CertificateDer::try_from(CERT).unwrap()];
     let key = PrivateKeyDer::try_from(KEY).unwrap();
-    // Use AWS libcrypto
-    aws_lc_rs::default_provider().install_default().unwrap();
+    // Set libcrypto provider
+    #[cfg(feature = "ring")]
+    rustls::crypto::ring::default_provider().install_default().unwrap();
+    #[cfg(not(feature = "ring"))]
+    rustls::crypto::aws_lc_rs::default_provider().install_default().unwrap();
     // Set up TLS config
     let server_crypto = ServerConfig::builder()
         .with_no_client_auth()
@@ -246,7 +248,7 @@ async fn main() -> Result<()> {
     // Set up the server
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let tls_acceptor = TlsAcceptor::from(Arc::new(server_crypto));
-    println!("Listening to {}", addr);
+    println!("Listening for TCP packets on {}", addr);
 
     let local_set = LocalSet::new();
     local_set.spawn_local(async move {
@@ -268,11 +270,11 @@ async fn main() -> Result<()> {
                     Ok(tls_stream) => tls_stream,
                     Err(err) => {
                         // Continue listening after broken
-                        eprintln!("failed to perform tls handshake: {err:#}");
+                        eprintln!("failed to perform TLS handshake: {err:#}");
                         continue;
                     }
                 };
-                println!("Accepted TCP/TLS connection from {}. Took {}ms.",
+                println!("Accepted TLS on TCP connection from {}. Took {}ms.",
                          remote_addr, conn_timer.elapsed().as_micros());
                 // Do RPC server stuff
                 let (reader, writer) =
