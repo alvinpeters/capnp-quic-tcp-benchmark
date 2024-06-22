@@ -1,113 +1,294 @@
-mod quic_server;
-mod capnp_server;
+// Copyright (c) 2013-2015 Sandstorm Development Group, Inc. and contributors
+// Licensed under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
-use std::future::Future;
-use std::net::SocketAddr;
-use anyhow::{Result};
-use capnp_futures::serialize::read_message;
-use clap::Parser;
-use quinn::{Incoming, RecvStream, SendStream};
-use tokio::task::LocalSet;
-use tokio_util::compat::{TokioAsyncReadCompatExt};
-use protos::addressbook_capnp::{address_book, person};
-use crate::capnp_server::{CalculatorImpl, start_rpc};
+
+use std::io::{Result, Error as IoError, ErrorKind};
+use std::sync::Arc;
+
+use capnp::primitive_list;
+use capnp::Error;
+
+use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
+
 use protos::calculator_capnp::calculator;
-use crate::quic_server::{get_quic_server, handle_conn};
+use capnp::capability::Promise;
+use quinn::crypto::rustls::QuicServerConfig;
+use quinn::Endpoint;
 
-#[derive(Parser, Debug)]
-#[clap(name = "server")]
-pub(crate) struct Opt {
-    /// file to log TLS keys to for debugging
-    #[clap(long = "keylog")]
-    keylog: bool,
-    /// Enable stateless retries
-    #[clap(long = "stateless-retry")]
-    stateless_retry: bool,
-    /// Address to listen on
-    #[clap(long = "listen", default_value = "127.0.0.1:4433")]
-    listen: SocketAddr,
-    /// Maximum number of concurrent connections to allow
-    #[clap(long = "connection-limit")]
-    connection_limit: Option<usize>,
+use futures::{future, FutureExt};
+
+use rustls::crypto::aws_lc_rs;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
+use tokio::task::{JoinSet, LocalSet};
+use tokio::time::Instant;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use protos::key_cert_bytes::{CERT, KEY};
+
+struct ValueImpl {
+    value: f64,
+}
+
+impl ValueImpl {
+    fn new(value: f64) -> Self {
+        Self { value }
+    }
+}
+
+impl calculator::value::Server for ValueImpl {
+    fn read(
+        &mut self,
+        _params: calculator::value::ReadParams,
+        mut results: calculator::value::ReadResults,
+    ) -> Promise<(), Error> {
+        results.get().set_value(self.value);
+        Promise::ok(())
+    }
+}
+
+fn evaluate_impl(
+    expression: calculator::expression::Reader,
+    params: Option<primitive_list::Reader<f64>>,
+) -> Promise<f64, Error> {
+    match pry!(expression.which()) {
+        calculator::expression::Literal(v) => Promise::ok(v),
+        calculator::expression::PreviousResult(p) => Promise::from_future(
+            pry!(p)
+                .read_request()
+                .send()
+                .promise
+                .map(|v| Ok(v?.get()?.get_value())),
+        ),
+        calculator::expression::Parameter(p) => match params {
+            Some(params) if p < params.len() => Promise::ok(params.get(p)),
+            _ => Promise::err(Error::failed(format!("bad parameter: {p}"))),
+        },
+        calculator::expression::Call(call) => {
+            let func = pry!(call.get_function());
+            // Used a JoinSet to spawn locally to get rid of futures crate (stupid idea)
+            let mut eval_params = JoinSet::new();
+            for p in pry!(call.get_params()) {
+                eval_params.spawn_local(evaluate_impl(p, params));
+            }
+            let eval_params = future::try_join_all(
+                pry!(call.get_params())
+                    .iter()
+                    .map(|p| evaluate_impl(p, params)),
+            );
+            Promise::from_future(async move {
+                let param_values = eval_params.await?;
+                let mut request = func.call_request();
+                {
+                    let mut params = request.get().init_params(param_values.len() as u32);
+                    for (ii, value) in param_values.iter().enumerate() {
+                        params.set(ii as u32, *value);
+                    }
+                }
+                Ok(request.send().promise.await?.get()?.get_value())
+            })
+        }
+    }
+}
+
+struct FunctionImpl {
+    param_count: u32,
+    body: ::capnp_rpc::ImbuedMessageBuilder<::capnp::message::HeapAllocator>,
+}
+
+impl FunctionImpl {
+    fn new(param_count: u32, body: calculator::expression::Reader) -> ::capnp::Result<Self> {
+        let mut result = Self {
+            param_count,
+            body: ::capnp_rpc::ImbuedMessageBuilder::new(::capnp::message::HeapAllocator::new()),
+        };
+        result.body.set_root(body)?;
+        Ok(result)
+    }
+}
+
+impl calculator::function::Server for FunctionImpl {
+    fn call(
+        &mut self,
+        params: calculator::function::CallParams,
+        mut results: calculator::function::CallResults,
+    ) -> Promise<(), Error> {
+        let params = pry!(pry!(params.get()).get_params());
+        if params.len() != self.param_count {
+            return Promise::err(Error::failed(format!(
+                "Expected {} parameters but got {}.",
+                self.param_count,
+                params.len()
+            )));
+        }
+
+        let eval = evaluate_impl(
+            pry!(self.body.get_root::<calculator::expression::Builder>()).into_reader(),
+            Some(params),
+        );
+        Promise::from_future(async move {
+            results.get().set_value(eval.await?);
+            Ok(())
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct OperatorImpl {
+    op: calculator::Operator,
+}
+
+impl calculator::function::Server for OperatorImpl {
+    fn call(
+        &mut self,
+        params: calculator::function::CallParams,
+        mut results: calculator::function::CallResults,
+    ) -> Promise<(), Error> {
+        let params = pry!(pry!(params.get()).get_params());
+        if params.len() != 2 {
+            Promise::err(Error::failed("Wrong number of paramters.".to_string()))
+        } else {
+            let v = match self.op {
+                calculator::Operator::Add => params.get(0) + params.get(1),
+                calculator::Operator::Subtract => params.get(0) - params.get(1),
+                calculator::Operator::Multiply => params.get(0) * params.get(1),
+                calculator::Operator::Divide => params.get(0) / params.get(1),
+            };
+            results.get().set_value(v);
+            Promise::ok(())
+        }
+    }
+}
+
+struct CalculatorImpl;
+
+impl calculator::Server for CalculatorImpl {
+    fn evaluate(
+        &mut self,
+        params: calculator::EvaluateParams,
+        mut results: calculator::EvaluateResults,
+    ) -> Promise<(), Error> {
+        Promise::from_future(async move {
+            let v = evaluate_impl(params.get()?.get_expression()?, None).await?;
+            results
+                .get()
+                .set_value(capnp_rpc::new_client(ValueImpl::new(v)));
+            Ok(())
+        })
+    }
+    fn def_function(
+        &mut self,
+        params: calculator::DefFunctionParams,
+        mut results: calculator::DefFunctionResults,
+    ) -> Promise<(), Error> {
+        results
+            .get()
+            .set_func(capnp_rpc::new_client(pry!(FunctionImpl::new(
+                pry!(params.get()).get_param_count() as u32,
+                pry!(pry!(params.get()).get_body())
+            ))));
+        Promise::ok(())
+    }
+    fn get_operator(
+        &mut self,
+        params: calculator::GetOperatorParams,
+        mut results: calculator::GetOperatorResults,
+    ) -> Promise<(), Error> {
+        let op = pry!(pry!(params.get()).get_op());
+        results
+            .get()
+            .set_func(capnp_rpc::new_client(OperatorImpl { op }));
+        Promise::ok(())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Starting server!");
-    let options = Opt::parse();
-    let endpoint = get_quic_server(&options).await?;
-    println!("listening on {}", endpoint.local_addr()?);
-    while let Some(conn) = endpoint.accept().await {
-        if options
-            .connection_limit
-            .map_or(false, |n| endpoint.open_connections() >= n)
-        {
-            println!("refusing due to open connection limit");
-            conn.refuse();
-        } else if options.stateless_retry && !conn.remote_address_validated() {
-            println!("requiring connection to validate its address");
-            conn.retry().unwrap();
-        } else {
-            println!("accepting connection");
-            let fut = start_rpc_connection(conn, start_rpc).await;
-            tokio::spawn(async move {
-                if let Err(e) = fut {
-                    eprintln!("connection failed: {reason}", reason = e.to_string())
+    use std::net::ToSocketAddrs;
+    let args: Vec<String> = ::std::env::args().collect();
+    if args.len() != 2 {
+        println!("usage: {} ADDRESS[:PORT]", args[0]);
+        return Ok(());
+    }
+
+    let addr = args[1]
+        .to_socket_addrs()?
+        .next()
+        .expect("could not parse address");
+    // Include self-signed generated keys
+    let certs = vec![CertificateDer::try_from(CERT).unwrap()];
+    let key = PrivateKeyDer::try_from(KEY).unwrap();
+    // Use AWS libcrypto
+    aws_lc_rs::default_provider().install_default().unwrap();
+    // Set up TLS config
+    let server_crypto = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| error(e.to_string()))?;
+    let server_config =
+        quinn::ServerConfig::with_crypto(
+            Arc::new(QuicServerConfig::try_from(server_crypto)
+                .map_err(|_| error("No initial cipher suite".to_string()))?));
+
+    // Set up the server
+    let listener = Endpoint::server(server_config, addr)?;
+    println!("Listening to {}", addr);
+
+    let local_set = LocalSet::new();
+    local_set.spawn_local(async move {
+        let calc: calculator::Client = capnp_rpc::new_client(CalculatorImpl);
+        // Accept incoming connections
+        while let Some(incoming) = listener.accept().await {
+            let conn_timer = Instant::now();
+            let remote_addr = incoming.remote_address();
+            // Accept requests
+            let Ok(conn) = incoming.await else {
+                eprintln!("Failed to handle incoming UDP connection. Breaking.");
+                continue;
+            };
+            let Ok((writer, reader)) = conn.accept_bi().await else {
+                eprintln!("Failed to accept new UDP connection. Breaking.");
+                continue;
+            };
+            println!("Accepted TCP/TLS connection from {}. Took {}ms.",
+                     remote_addr, conn_timer.elapsed().as_micros());
+            // Do RPC server stuff
+            let network = twoparty::VatNetwork::new(
+                reader.compat(),
+                writer.compat_write(),
+                rpc_twoparty_capnp::Side::Server,
+                Default::default(),
+            );
+
+            let rpc_system = RpcSystem::new(Box::new(network), Some(calc.clone().client));
+            tokio::task::spawn_local(async move {
+                if let Err(e) = rpc_system.await {
+                    println!("error: {e:?}");
                 }
             });
         }
-    }
+    });
+    local_set.await;
     Ok(())
 }
 
-async fn start_rpc_connection<F, Fut>(conn: Incoming, f: F) -> Result<()> where
-    F: FnOnce(SendStream, RecvStream, calculator::Client) -> Fut,
-    Fut: Future<Output = Result<()>>
-{
-    let calc: calculator::Client = capnp_rpc::new_client(CalculatorImpl);
-    let Some((recv, send)) = handle_conn(conn).await? else {
-        return Ok(())
-    };
-    let local = LocalSet::new();
-    local.run_until(f(recv, send, calc.clone())).await?;
-    Ok(())
-}
-
-async fn print_addressbook((_send_stream, receive_stream): (SendStream, RecvStream)) -> Result<()> {
-
-    let message_reader
-        = read_message(&mut receive_stream.compat(), capnp::message::ReaderOptions::new()).await?;
-    let address_book = message_reader.get_root::<address_book::Reader>()?;
-    for person in address_book.get_people()? {
-        println!(
-            "{}: {}",
-            person.get_name()?.to_str()?,
-            person.get_email()?.to_str()?
-        );
-        for phone in person.get_phones()? {
-            let type_name = match phone.get_type() {
-                Ok(person::phone_number::Type::Mobile) => "mobile",
-                Ok(person::phone_number::Type::Home) => "home",
-                Ok(person::phone_number::Type::Work) => "work",
-                Err(::capnp::NotInSchema(_)) => "UNKNOWN",
-            };
-            println!("  {} phone: {}", type_name, phone.get_number()?.to_str()?);
-        }
-        match person.get_employment().which() {
-            Ok(person::employment::Unemployed(())) => {
-                println!("  unemployed");
-            }
-            Ok(person::employment::Employer(employer)) => {
-                println!("  employer: {}", employer?.to_str()?);
-            }
-            Ok(person::employment::School(school)) => {
-                println!("  student at: {}", school?.to_str()?);
-            }
-            Ok(person::employment::SelfEmployed(())) => {
-                println!("  self-employed");
-            }
-            Err(::capnp::NotInSchema(_)) => {}
-        }
-    }
-    Ok(())
+fn error(err: String) -> IoError {
+    IoError::new(ErrorKind::Other, err)
 }

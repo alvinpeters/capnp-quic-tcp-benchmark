@@ -31,15 +31,16 @@ use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 use protos::calculator_capnp::calculator;
 use capnp::capability::Promise;
 
-use futures::future;
-use futures::{AsyncReadExt, FutureExt, TryFutureExt};
+use futures::{future, FutureExt};
+
 use rustls::crypto::aws_lc_rs;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
-use tokio::task::LocalSet;
+use tokio::io;
+use tokio::task::{JoinSet, LocalSet};
 use tokio::time::Instant;
 use tokio_rustls::TlsAcceptor;
-use tokio_util::compat::TokioAsyncReadCompatExt;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use protos::key_cert_bytes::{CERT, KEY};
 
 struct ValueImpl {
@@ -82,6 +83,11 @@ fn evaluate_impl(
         },
         calculator::expression::Call(call) => {
             let func = pry!(call.get_function());
+            // Used a JoinSet to spawn locally to get rid of futures crate (stupid idea)
+            let mut eval_params = JoinSet::new();
+            for p in pry!(call.get_params()) {
+                eval_params.spawn_local(evaluate_impl(p, params));
+            }
             let eval_params = future::try_join_all(
                 pry!(call.get_params())
                     .iter()
@@ -232,14 +238,14 @@ async fn main() -> Result<()> {
     // Use AWS libcrypto
     aws_lc_rs::default_provider().install_default().unwrap();
     // Set up TLS config
-    let server_config = ServerConfig::builder()
+    let server_crypto = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|e| error(e.to_string()))?;
 
     // Set up the server
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let tls_acceptor = TlsAcceptor::from(Arc::new(server_crypto));
     println!("Listening to {}", addr);
 
     let local_set = LocalSet::new();
@@ -270,16 +276,20 @@ async fn main() -> Result<()> {
                          remote_addr, conn_timer.elapsed().as_micros());
                 // Do RPC server stuff
                 let (reader, writer) =
-                    stream.compat().split();
+                    io::split(stream);
                 let network = twoparty::VatNetwork::new(
-                    futures::io::BufReader::new(reader),
-                    futures::io::BufWriter::new(writer),
+                    reader.compat(),
+                    writer.compat_write(),
                     rpc_twoparty_capnp::Side::Server,
                     Default::default(),
                 );
 
                 let rpc_system = RpcSystem::new(Box::new(network), Some(calc.clone().client));
-                tokio::task::spawn_local(rpc_system.map_err(|e| println!("error: {e:?}")));
+                tokio::task::spawn_local(async move {
+                    if let Err(e) = rpc_system.await {
+                        println!("error: {e:?}");
+                    }
+                });
             }
         });
     local_set.await;
