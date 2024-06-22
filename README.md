@@ -1,4 +1,4 @@
-# Cap'n Proto RPC on QUIC
+# Cap'n Proto RPC on QUIC vs. TLS/TCP
 
 So I decided to find out whether using QUIC
 as a drop-in replacement to TCP for Cap'n Proto.
